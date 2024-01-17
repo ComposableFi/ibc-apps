@@ -49,11 +49,12 @@ type Keeper struct {
 	cdc      codec.BinaryCodec
 	storeKey storetypes.StoreKey
 
-	transferKeeper types.TransferKeeper
-	channelKeeper  types.ChannelKeeper
-	distrKeeper    types.DistributionKeeper
-	bankKeeper     types.BankKeeper
-	ics4Wrapper    porttypes.ICS4Wrapper
+	transferKeeper           types.TransferKeeper
+	channelKeeper            types.ChannelKeeper
+	distrKeeper              types.DistributionKeeper
+	bankKeeper               types.BankKeeper
+	ics4Wrapper              porttypes.ICS4Wrapper
+	transferMiddlewareKeeper types.TransferMiddlewareKeeper
 
 	// the address capable of executing a MsgUpdateParams message. Typically, this
 	// should be the x/gov module account.
@@ -69,17 +70,19 @@ func NewKeeper(
 	distrKeeper types.DistributionKeeper,
 	bankKeeper types.BankKeeper,
 	ics4Wrapper porttypes.ICS4Wrapper,
+	transferMiddlewareKeeper types.TransferMiddlewareKeeper,
 	authority string,
 ) *Keeper {
 	return &Keeper{
-		cdc:            cdc,
-		storeKey:       key,
-		transferKeeper: transferKeeper,
-		channelKeeper:  channelKeeper,
-		distrKeeper:    distrKeeper,
-		bankKeeper:     bankKeeper,
-		ics4Wrapper:    ics4Wrapper,
-		authority:      authority,
+		cdc:                      cdc,
+		storeKey:                 key,
+		transferKeeper:           transferKeeper,
+		channelKeeper:            channelKeeper,
+		distrKeeper:              distrKeeper,
+		bankKeeper:               bankKeeper,
+		ics4Wrapper:              ics4Wrapper,
+		transferMiddlewareKeeper: transferMiddlewareKeeper,
+		authority:                authority,
 	}
 }
 
@@ -239,14 +242,47 @@ func (k *Keeper) WriteAcknowledgementForForwardedPacket(
 			escrowAddress := transfertypes.GetEscrowAddress(packet.SourcePort, packet.SourceChannel)
 
 			if transfertypes.SenderChainIsSource(inFlightPacket.RefundPortId, inFlightPacket.RefundChannelId, fullDenomPath) {
-				// transfer funds from escrow account for forwarded packet to escrow account going back for refund.
+				paraChainIBCTokenInfo, found := k.GetParachainTokenInfoByNativeDenom(ctx, data.Denom)
+				if found && (paraChainIBCTokenInfo.ChannelID() == inFlightPacket.RefundChannelId) {
+					// if packet was forwarded from Picasso, we just need to burn the token in 2 escrow address
+					// parse the transfer amount
+					transferAmount, ok := sdk.NewIntFromString(data.Amount)
+					if !ok {
+						return errorsmod.Wrapf(transfertypes.ErrInvalidAmount, "unable to parse transfer amount: %s", data.Amount)
+					}
+					// send native token to module address
+					nativeToken := sdk.NewCoin(data.Denom, transferAmount)
+					if err := k.bankKeeper.SendCoinsFromAccountToModule(
+						ctx, escrowAddress, transfertypes.ModuleName, sdk.NewCoins(nativeToken),
+					); err != nil {
+						return fmt.Errorf("failed to send coins from escrow to module account for burn: %w", err)
+					}
+					// send ibc token to module address
+					ibcToken := sdk.NewCoin(paraChainIBCTokenInfo.IbcDenom(), transferAmount)
+					ibcEscrowAddress := transfertypes.GetEscrowAddress(inFlightPacket.RefundPortId, inFlightPacket.RefundChannelId)
+					if err = k.bankKeeper.SendCoinsFromAccountToModule(
+						ctx, ibcEscrowAddress, transfertypes.ModuleName, sdk.NewCoins(ibcToken),
+					); err != nil {
+						return fmt.Errorf("failed to send coins from escrow to module account for burn: %w", err)
+					}
+					// burn these 2 amount of token
+					if err := k.bankKeeper.BurnCoins(
+						ctx, transfertypes.ModuleName, sdk.NewCoins(nativeToken, ibcToken),
+					); err != nil {
+						// NOTE: should not happen as the module account was
+						// retrieved on the step above and it has enough balace
+						// to burn.
+						panic(fmt.Sprintf("cannot burn coins after a successful send from escrow account to module account: %v", err))
+					}
+				} else {
+					// transfer funds from escrow account for forwarded packet to escrow account going back for refund.
+					refundEscrowAddress := transfertypes.GetEscrowAddress(inFlightPacket.RefundPortId, inFlightPacket.RefundChannelId)
 
-				refundEscrowAddress := transfertypes.GetEscrowAddress(inFlightPacket.RefundPortId, inFlightPacket.RefundChannelId)
-
-				if err := k.bankKeeper.SendCoins(
-					ctx, escrowAddress, refundEscrowAddress, sdk.NewCoins(token),
-				); err != nil {
-					return fmt.Errorf("failed to send coins from escrow account to refund escrow account: %w", err)
+					if err := k.bankKeeper.SendCoins(
+						ctx, escrowAddress, refundEscrowAddress, sdk.NewCoins(token),
+					); err != nil {
+						return fmt.Errorf("failed to send coins from escrow account to refund escrow account: %w", err)
+					}
 				}
 			} else {
 				// transfer the coins from the escrow account to the module account and burn them.
@@ -270,6 +306,37 @@ func (k *Keeper) WriteAcknowledgementForForwardedPacket(
 			// We move funds from the escrowAddress in both cases,
 			// update the total escrow amount for the denom.
 			k.unescrowToken(ctx, token)
+		} else {
+			// Sender chain is sink
+			denomTrace := transfertypes.ParseDenomTrace(fullDenomPath)
+			paraChainIBCTokenInfo, found := k.GetParachainTokenInfoByAssetID(ctx, denomTrace.BaseDenom)
+			if found && (paraChainIBCTokenInfo.ChannelID() == packet.SourceChannel) {
+				// This packet is forwared to picasso => Mint Ibc token and native token to escrow address
+				// parse the transfer amount
+				transferAmount, ok := sdk.NewIntFromString(data.Amount)
+				if !ok {
+					return errorsmod.Wrapf(transfertypes.ErrInvalidAmount, "unable to parse transfer amount: %s", data.Amount)
+				}
+				// send native token to native escrow address
+				nativeToken := sdk.NewCoin(paraChainIBCTokenInfo.NativeDenom(), transferAmount)
+				nativeEscrowAddress := transfertypes.GetEscrowAddress(inFlightPacket.RefundPortId, inFlightPacket.RefundChannelId)
+				if err := k.bankKeeper.MintCoins(ctx, transfertypes.ModuleName, sdk.NewCoins(nativeToken)); err != nil {
+					return fmt.Errorf("failed to send coins from escrow to module account for burn: %w", err)
+				}
+				if err := k.bankKeeper.SendCoinsFromModuleToAccount(ctx, transfertypes.ModuleName, nativeEscrowAddress, sdk.NewCoins(nativeToken)); err != nil {
+					panic(err)
+				}
+
+				// send ibc token to ibc escrow address
+				ibcToken := sdk.NewCoin(paraChainIBCTokenInfo.IbcDenom(), transferAmount)
+				ibcEscrowAddress := transfertypes.GetEscrowAddress(packet.SourcePort, packet.SourceChannel)
+				if err := k.bankKeeper.MintCoins(ctx, transfertypes.ModuleName, sdk.NewCoins(ibcToken)); err != nil {
+					return fmt.Errorf("failed to send coins from escrow to module account for burn: %w", err)
+				}
+				if err := k.bankKeeper.SendCoinsFromModuleToAccount(ctx, transfertypes.ModuleName, ibcEscrowAddress, sdk.NewCoins(ibcToken)); err != nil {
+					panic(err)
+				}
+			}
 		}
 	}
 
@@ -570,4 +637,22 @@ func (k *Keeper) GetAppVersion(
 // LookupModuleByChannel wraps ChannelKeeper LookupModuleByChannel function.
 func (k *Keeper) LookupModuleByChannel(ctx sdk.Context, portID, channelID string) (string, *capabilitytypes.Capability, error) {
 	return k.channelKeeper.LookupModuleByChannel(ctx, portID, channelID)
+}
+
+// GetParachainTokenInfoByAssetID returns the token info by assetID and if it was found
+func (k Keeper) GetParachainTokenInfoByAssetID(ctx sdk.Context, assetID string) (prcTokenInfo types.ParaChainIBCTokenInfo, found bool) {
+	if !k.transferMiddlewareKeeper.HasParachainIBCTokenInfoByAssetID(ctx, assetID) {
+		return prcTokenInfo, false
+	}
+
+	return k.transferMiddlewareKeeper.ParachainIBCTokenInfoByAssetID(ctx, assetID), true
+}
+
+// GetParachainTokenInfoByNativeDenom returns the token info by denom and if it was found
+func (k Keeper) GetParachainTokenInfoByNativeDenom(ctx sdk.Context, nativeDenom string) (prcTokenInfo types.ParaChainIBCTokenInfo, found bool) {
+	if !k.transferMiddlewareKeeper.HasParachainIBCTokenInfoByNativeDenom(ctx, nativeDenom) {
+		return prcTokenInfo, false
+	}
+
+	return k.transferMiddlewareKeeper.ParachainIBCTokenInfoByNativeDenom(ctx, nativeDenom), true
 }

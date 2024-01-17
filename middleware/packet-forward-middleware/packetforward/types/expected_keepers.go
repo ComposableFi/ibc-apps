@@ -39,3 +39,18 @@ type BankKeeper interface {
 	MintCoins(ctx sdk.Context, moduleName string, amt sdk.Coins) error
 	BurnCoins(ctx sdk.Context, moduleName string, amt sdk.Coins) error
 }
+
+// Transfer middleware keeper
+type TransferMiddlewareKeeper interface {
+	HasParachainIBCTokenInfoByNativeDenom(ctx sdk.Context, nativeDenom string) bool
+	HasParachainIBCTokenInfoByAssetID(ctx sdk.Context, assetID string) bool
+	ParachainIBCTokenInfoByNativeDenom(ctx sdk.Context, nativeDenom string) ParaChainIBCTokenInfo
+	ParachainIBCTokenInfoByAssetID(ctx sdk.Context, assetID string) ParaChainIBCTokenInfo
+}
+
+// ParaChainIBCTokenInfo interface to avoid coupling import
+type ParaChainIBCTokenInfo interface {
+	NativeDenom() string
+	IbcDenom() string
+	ChannelID() string
+}

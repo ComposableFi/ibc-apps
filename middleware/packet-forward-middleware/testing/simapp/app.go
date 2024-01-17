@@ -443,6 +443,7 @@ func NewSimApp(
 		app.DistrKeeper,
 		app.BankKeeper,
 		app.IBCKeeper.ChannelKeeper,
+		nil,
 		authority,
 	)
 
