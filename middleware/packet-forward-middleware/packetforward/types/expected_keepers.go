@@ -50,7 +50,7 @@ type TransferMiddlewareKeeper interface {
 
 // ParaChainIBCTokenInfo interface to avoid coupling import
 type ParaChainIBCTokenInfo interface {
-	NativeDenom() string
-	IbcDenom() string
-	ChannelID() string
+	GetNativeDenom() string
+	GetIbcDenom() string
+	GetChannelID() string
 }
