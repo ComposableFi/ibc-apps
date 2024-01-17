@@ -273,6 +273,11 @@ func TestOnRecvPacket_ForwardNoFee(t *testing.T) {
 		setup.Mocks.IBCModuleMock.EXPECT().OnRecvPacket(ctx, packetModifiedSender, senderAccAddr).
 			Return(acknowledgement),
 
+		setup.Mocks.TransferMiddlewareKeeperMock.EXPECT().HasParachainIBCTokenInfoByAssetID(
+			sdk.WrapSDKContext(ctx),
+			testDenom,
+		).Return(false),
+
 		setup.Mocks.TransferKeeperMock.EXPECT().Transfer(
 			sdk.WrapSDKContext(ctx),
 			transfertypes.NewMsgTransfer(
@@ -333,6 +338,11 @@ func TestOnRecvPacket_ForwardAmountInt256(t *testing.T) {
 	gomock.InOrder(
 		setup.Mocks.IBCModuleMock.EXPECT().OnRecvPacket(ctx, packetModifiedSender, senderAccAddr).
 			Return(acknowledgement),
+
+		setup.Mocks.TransferMiddlewareKeeperMock.EXPECT().HasParachainIBCTokenInfoByAssetID(
+			sdk.WrapSDKContext(ctx),
+			testDenom,
+		).Return(false),
 
 		setup.Mocks.TransferKeeperMock.EXPECT().Transfer(
 			sdk.WrapSDKContext(ctx),
@@ -395,6 +405,11 @@ func TestOnRecvPacket_ForwardWithFee(t *testing.T) {
 	gomock.InOrder(
 		setup.Mocks.IBCModuleMock.EXPECT().OnRecvPacket(ctx, packetModifiedSender, senderAccAddr).
 			Return(acknowledgement),
+
+		setup.Mocks.TransferMiddlewareKeeperMock.EXPECT().HasParachainIBCTokenInfoByAssetID(
+			sdk.WrapSDKContext(ctx),
+			testDenom,
+		).Return(false),
 
 		setup.Mocks.DistributionKeeperMock.EXPECT().FundCommunityPool(
 			ctx,
@@ -501,6 +516,11 @@ func TestOnRecvPacket_ForwardMultihopStringNext(t *testing.T) {
 		setup.Mocks.IBCModuleMock.EXPECT().OnRecvPacket(ctx, packetModifiedSender, senderAccAddr).
 			Return(acknowledgement),
 
+		setup.Mocks.TransferMiddlewareKeeperMock.EXPECT().HasParachainIBCTokenInfoByAssetID(
+			sdk.WrapSDKContext(ctx),
+			testDenom,
+		).Return(false),
+
 		setup.Mocks.TransferKeeperMock.EXPECT().Transfer(
 			sdk.WrapSDKContext(ctx),
 			msgTransfer1,
@@ -508,6 +528,11 @@ func TestOnRecvPacket_ForwardMultihopStringNext(t *testing.T) {
 
 		setup.Mocks.IBCModuleMock.EXPECT().OnRecvPacket(ctx, packet2ModifiedSender, senderAccAddr2).
 			Return(acknowledgement),
+
+		setup.Mocks.TransferMiddlewareKeeperMock.EXPECT().HasParachainIBCTokenInfoByAssetID(
+			sdk.WrapSDKContext(ctx),
+			testDenom,
+		).Return(false),
 
 		setup.Mocks.TransferKeeperMock.EXPECT().Transfer(
 			sdk.WrapSDKContext(ctx),
@@ -613,6 +638,11 @@ func TestOnRecvPacket_ForwardMultihopJSONNext(t *testing.T) {
 		setup.Mocks.IBCModuleMock.EXPECT().OnRecvPacket(ctx, packetModifiedSender, senderAccAddr).
 			Return(acknowledgement),
 
+		setup.Mocks.TransferMiddlewareKeeperMock.EXPECT().HasParachainIBCTokenInfoByAssetID(
+			sdk.WrapSDKContext(ctx),
+			testDenom,
+		).Return(false),
+
 		setup.Mocks.TransferKeeperMock.EXPECT().Transfer(
 			sdk.WrapSDKContext(ctx),
 			msgTransfer1,
@@ -620,6 +650,11 @@ func TestOnRecvPacket_ForwardMultihopJSONNext(t *testing.T) {
 
 		setup.Mocks.IBCModuleMock.EXPECT().OnRecvPacket(ctx, packet2ModifiedSender, senderAccAddr2).
 			Return(acknowledgement),
+
+		setup.Mocks.TransferMiddlewareKeeperMock.EXPECT().HasParachainIBCTokenInfoByAssetID(
+			sdk.WrapSDKContext(ctx),
+			testDenom,
+		).Return(false),
 
 		setup.Mocks.TransferKeeperMock.EXPECT().Transfer(
 			sdk.WrapSDKContext(ctx),
